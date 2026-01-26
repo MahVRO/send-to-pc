@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Send to PC</title>
+  <style>
+    :root {
+      --bg: #0f0f0f;
+      --card: #161616;
+      --accent: #6b4eff;
+      --text: #ffffff;
+      --muted: #9a9a9a;
+      --danger: #ff4e4e;
+      --success: #4eff8f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    .app {
+      min-height: 100vh;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    h1 { font-size: 20px; margin: 0; text-align: center; }
+    .card {
+      background: var(--card);
+      border-radius: 14px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .row { display: flex; gap: 10px; }
+    .editor {
+      min-height: 120px;
+      background: #0b0b0b;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      color: var(--text);
+      padding: 10px;
+      font-size: 14px;
+    }
+    .editor:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    button {
+      padding: 12px;
+      border-radius: 12px;
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary { background: #2a2a2a; color: var(--text); }
+    button.disabled { opacity: 0.4; pointer-events: none; }
+    .toolbar { display: flex; gap: 6px; flex-wrap: wrap; }
+    .toolbar button {
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: #2a2a2a;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .mode-toggle { display: flex; gap: 6px; margin-bottom: 6px; }
+    .mode-toggle button { flex: 1; background: #2a2a2a; color: var(--text); }
+    .mode-toggle button.active { background: var(--accent); }
+    .pill {
+      background: #1e1e1e;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    .pill.hover { background: #2a2a2a; opacity: 0.6; }
+    .list { display: flex; flex-direction: column; gap: 10px; }
+    .item { background: #0b0b0b; border-radius: 10px; padding: 10px; font-size: 14px; }
+    .item-header { display: flex; align-items: center; }
+    .item span { color: var(--muted); font-size: 12px; }
+    .delete-x {
+      background: none;
+      border: none;
+      color: white;
+      font-size: 22px;
+      font-weight: 800;
+      cursor: pointer;
+      padding: 0 8px;
+      margin-left: auto;
+    }
+    .item-preview {
+      margin-top: 8px;
+      background: #121212;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 13px;
+      color: #ddd;
+      cursor: text;
+      display: none;
+      white-space: pre-wrap;
+      transition: opacity 0.2s ease;
+    }
+    .status {
+      font-size: 13px;
+      text-align: center;
+    }
+    .status.error { color: var(--danger); }
+    .status.success { color: var(--success); }
+    @media (min-width: 768px) { .app { max-width: 480px; margin: auto; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>Send to PC</h1>
+    <div class="card">
+      <div class="mode-toggle">
+        <button id="textMode" class="active">Text</button>
+        <button id="codeMode">Code</button>
+      </div>
+      <div class="toolbar">
+        <button data-tag="strong">B</button>
+        <button data-tag="em">I</button>
+        <button data-tag="u">U</button>
+        <button data-tag="s">S</button>
+      </div>
+      <div id="textEditor" class="editor" contenteditable></div>
+      <pre id="codeEditor" class="editor" contenteditable style="display:none;font-family:monospace;"></pre>
+      <div class="row" style="align-items:center;">
+        <button type="button" class="secondary" id="fileBtn">Upload File</button>
+        <button type="button" class="secondary" id="imageBtn">Upload Image</button>
+        <div id="sizeInfo" style="margin-left:auto;font-size:12px;color:var(--muted);">0 / 100 MB</div>
+      </div>
+      <div id="pendingPills" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+      <input id="fileInput" type="file" multiple style="display:none;" />
+      <input id="imageInput" type="file" accept="image/*" multiple style="display:none;" />
+      <button id="nextBtn" style="width:100%">Next</button>
+    </div>
+    <div class="card">
+      <h2 style="font-size:16px;margin:0">Ready to send</h2>
+      <div id="sentList" class="list"></div>
+      <div id="status" class="status"></div>
+      <button id="sendBtn" class="disabled">Send</button>
+    </div>
+  </div>
+  <script>
+    const textEditor = document.getElementById('textEditor');
+    const codeEditor = document.getElementById('codeEditor');
+    const sentList = document.getElementById('sentList');
+    const sendBtn = document.getElementById('sendBtn');
+    const statusEl = document.getElementById('status');
+    const textModeBtn = document.getElementById('textMode');
+    const codeModeBtn = document.getElementById('codeMode');
+    const fileBtn = document.getElementById('fileBtn');
+    const imageBtn = document.getElementById('imageBtn');
+    const pendingPills = document.getElementById('pendingPills');
+    const sizeInfo = document.getElementById('sizeInfo');
+    const MAX_BYTES = 100 * 1024 * 1024;
+    let pendingUploads = [];
+    let isSending = false;
+    const API_URL = 'https://send-to-pc.onrender.com';
+    const APP_TOKEN = '9f8a1d3c4e6b7a2f8c9d0e1a2b3c4d5e153uoi135e7f8a9b0c1d2e3f4g5h6i7j';
+
+    textModeBtn.onclick = () => {
+      textModeBtn.classList.add('active');
+      codeModeBtn.classList.remove('active');
+      textEditor.style.display = 'block';
+      codeEditor.style.display = 'none';
+    };
+
+    codeModeBtn.onclick = () => {
+      codeModeBtn.classList.add('active');
+      textModeBtn.classList.remove('active');
+      textEditor.style.display = 'none';
+      codeEditor.style.display = 'block';
+    };
+
+    document.querySelectorAll('.toolbar button').forEach(btn => {
+      btn.onclick = () => {
+        if (codeEditor.style.display === 'block') return;
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return;
+        const range = sel.getRangeAt(0);
+        if (!textEditor.contains(range.commonAncestorContainer)) return;
+        const el = document.createElement(btn.dataset.tag);
+        el.appendChild(range.extractContents());
+        range.insertNode(el);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      };
+    }); // end of sentList.querySelectorAll('.item').forEach
+
+    function refreshSendButton() {
+      sendBtn.classList.toggle('disabled', sentList.children.length === 0 || isSending);
+    }
+
+    function addItem(title, content, upload = null) {
+      const div = document.createElement('div');
+      div.className = 'item';
+      if (upload) div.__upload = upload;
+      div.innerHTML = `
+        <div class="item-header">
+          <div class="item-title">${title}<br><span>pending</span></div>
+          <button class="delete-x">×</button>
+        </div>
+        <div class="item-preview">${content}</div>
+      `;
+
+      const preview = div.querySelector('.item-preview');
+      const del = div.querySelector('.delete-x');
+      const header = div.querySelector('.item-header');
+
+      header.onclick = () => {
+        const open = preview.style.display === 'block';
+        preview.style.display = open ? 'none' : 'block';
+        preview.style.opacity = open ? '0' : '1';
+      };
+
+      del.onclick = e => {
+        e.stopPropagation();
+        div.remove();
+        refreshSendButton();
+      };
+
+      sentList.appendChild(div);
+      refreshSendButton();
+    }
+
+    function renderPending() {
+      pendingPills.innerHTML = '';
+      let total = 0;
+
+      pendingUploads.forEach(entry => {
+        total += entry.file.size;
+        const pill = document.createElement('div');
+        pill.className = 'pill';
+        pill.textContent = `${entry.type === 'image' ? '🖼️' : '📄'} ${entry.file.name}`;
+
+        let clicks = 0;
+        pill.onmouseenter = () => pill.classList.add('hover');
+        pill.onmouseleave = () => pill.classList.remove('hover');
+        pill.onclick = () => {
+          clicks++;
+          if (clicks === 2) {
+            pendingUploads = pendingUploads.filter(x => x !== entry);
+            renderPending();
+          }
+          setTimeout(() => clicks = 0, 300);
+        };
+
+        pendingPills.appendChild(pill);
+      });
+
+      sizeInfo.textContent = `${Math.round(total / 1024 / 1024)} / 100 MB`;
+      sizeInfo.style.color = total > MAX_BYTES ? 'var(--danger)' : 'var(--muted)';
+    }
+    document.getElementById('fileInput').onchange = e => {
+      pendingUploads.push(...Array.from(e.target.files).map(f => ({ type: 'file', file: f })));
+      e.target.value = '';
+      renderPending();
+    };
+
+    document.getElementById('imageInput').onchange = e => {
+      pendingUploads.push(...Array.from(e.target.files).map(f => ({ type: 'image', file: f })));
+      e.target.value = '';
+      renderPending();
+    };
+
+    fileBtn.onclick = () => document.getElementById('fileInput').click();
+    imageBtn.onclick = () => document.getElementById('imageInput').click();
+
+    document.getElementById('nextBtn').onclick = () => {
+      if (codeEditor.style.display === 'block') {
+        const c = codeEditor.innerText.trim();
+        if (c) {
+          addItem('Code block', `<pre>${c}</pre>`);
+          codeEditor.innerText = '';
+        }
+      } else {
+        const t = textEditor.innerHTML.trim();
+        if (t) {
+          addItem('Text message', t);
+          textEditor.innerHTML = '';
+        }
+      }
+
+      pendingUploads.forEach(entry => {
+        addItem(entry.file.name, `${entry.type === 'image' ? 'Image' : 'File'} (${Math.round(entry.file.size / 1024)} KB)`);
+      });
+
+      pendingUploads = [];
+      renderPending();
+    };
+
+    sendBtn.onclick = async () => {
+      if (sendBtn.classList.contains('disabled') || isSending) return;
+      isSending = true;
+      statusEl.textContent = 'Sending…';
+      statusEl.className = 'status';
+      refreshSendButton();
+
+      const form = new FormData();
+      const items = [];
+
+      sentList.querySelectorAll('.item').forEach(item => {
+        const title = item.querySelector('.item-title').childNodes[0].textContent.trim();
+        const previewEl = item.querySelector('.item-preview');
+        const preview = previewEl ? previewEl.innerHTML : '';
+
+        if (title === 'Text message') {
+          items.push({ type: 'text', name: null, size: preview.length, content: preview, file_path: null });
+        } else if (title === 'Code block') {
+          items.push({ type: 'code', name: null, size: preview.length, content: preview, file_path: null });
+        } else {
+          const upload = item.__upload;
+          if (upload) {
+            form.append('files', upload.file);
+            items.push({
+              type: upload.type,
+              name: upload.file.name,
+              size: upload.file.size,
+              content: null,
+              file_path: null
+            });
+          }
+        }
+      });
+
+      form.append('meta', JSON.stringify({ items }));
+
+      try {
+        const res = await fetch(`${API_URL}/send`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${APP_TOKEN}` },
+          body: form
+        });
+
+        if (!res.ok) throw new Error('Upload failed');
+
+        statusEl.textContent = 'Sent successfully';
+        statusEl.className = 'status success';
+        sentList.innerHTML = '';
+      } catch {
+        statusEl.textContent = 'Send failed. Tap Send to retry.';
+        statusEl.className = 'status error';
+      } finally {
+        isSending = false;
+        refreshSendButton();
+      }
+    };
+  </script>
+</body>
+</html>
