@@ -25,6 +25,11 @@ def require_token(request: Request):
     if auth != f"Bearer {APP_TOKEN}":
         raise HTTPException(status_code=403, detail="Invalid token")
 
+from fastapi.responses import JSONResponse
+
+@app.options("/send")
+async def options_send():
+    return JSONResponse(status_code=200)
 
 @app.post("/send")
 async def send(
