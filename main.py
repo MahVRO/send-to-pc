@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 import os, uuid, json
 
@@ -34,9 +34,10 @@ async def options_send():
 @app.post("/send")
 async def send(
     request: Request,
-    meta: str,
+    meta: str = Form(...),
     files: list[UploadFile] = File(default=[]),
 ):
+
     require_token(request)
 
     try:
