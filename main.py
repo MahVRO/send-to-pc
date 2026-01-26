@@ -35,7 +35,7 @@ async def options_send():
 async def send(
     request: Request,
     meta: str = Form(...),
-    files: list[UploadFile] = File(default=[]),
+    files: list[UploadFile] | None = File(None),
 ):
 
     require_token(request)
