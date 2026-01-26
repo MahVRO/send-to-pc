@@ -293,9 +293,12 @@
       }
 
       pendingUploads.forEach(entry => {
-        addItem(entry.file.name, `${entry.type === 'image' ? 'Image' : 'File'} (${Math.round(entry.file.size / 1024)} KB)`);
-      });
-
+  addItem(
+    entry.file.name,
+    `${entry.type === 'image' ? 'Image' : 'File'} (${Math.round(entry.file.size / 1024)} KB)`,
+    entry
+  );
+});
       pendingUploads = [];
       renderPending();
     };
