@@ -45,7 +45,8 @@ def process_batches(data):
 
     for batch in batches:
         batch_id = batch["batch_id"]
-        print(f"\n=== Batch {batch_id} ===")
+        print(f"[!] Batch {batch_id} processed")
+        ack_batch(batch_id)
 
         for i, item in enumerate(batch.get("items", [])):
             save_text(batch_id, item, i)
@@ -62,3 +63,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def ack_batch(batch_id):
+    r = requests.post(f"{BASE_URL}/ack/{batch_id}", headers=HEADERS, timeout=10)
+    r.raise_for_status()
+    print(f"[✓] Batch {batch_id} acknowledged")
