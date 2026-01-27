@@ -27,6 +27,16 @@ def require_token(request: Request):
 
 from fastapi.responses import JSONResponse
 
+@app.get("/pending")
+def get_pending(request: Request):
+    auth = request.headers.get("Authorization")
+    if auth != f"Bearer {APP_TOKEN}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    return {
+        "batches": pending_items
+    }
+
 @app.options("/send")
 async def options_send():
     return JSONResponse(status_code=200)
