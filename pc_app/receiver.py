@@ -49,6 +49,15 @@ def process_batches(data):
     for batch in batches:
         print("BATCH OBJECT:", batch)
 
+        batch_id = batch["batch_id"]
+        print(f"[!] Batch {batch_id} processed")
+        ack_batch(batch_id)
+
+        for i, item in enumerate(batch.get("items", [])):
+            save_text(batch_id, item, i)
+
+        for file in batch.get("files", []):
+            download_file(file)
 
 def main():
     ensure_dirs()
