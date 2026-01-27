@@ -38,23 +38,17 @@ def save_text(batch_id, item, index):
     print(f"[✓] {item['type']} saved: {path}")
 
 def process_batches(data):
+    print("RAW /pending RESPONSE:")
+    print(data)
+
     batches = data.get("batches", [])
     if not batches:
         print("No pending batches.")
         return
 
     for batch in batches:
-        batch_id = batch["batch_id"]
-        print(f"[!] Batch {batch_id} processed")
-        ack_batch(batch_id)
+        print("BATCH OBJECT:", batch)
 
-        for i, item in enumerate(batch.get("items", [])):
-            save_text(batch_id, item, i)
-
-        for file in batch.get("files", []):
-            download_file(file)
-
-        print(f"[!] Batch {batch_id} processed (not yet acknowledged)")
 
 def main():
     ensure_dirs()
