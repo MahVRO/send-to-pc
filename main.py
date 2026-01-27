@@ -47,6 +47,22 @@ async def send(
     meta: str = Form(...),
     files: list[UploadFile] | None = File(None),
 ):
+    from fastapi import Request, HTTPException
+
+@app.post("/ack/{batch_id}")
+def ack_batch(batch_id: str, request: Request):
+    auth = request.headers.get("Authorization")
+    if auth != f"Bearer {APP_TOKEN}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    global pending_items
+    before = len(pending_items)
+    pending_items = [b for b in pending_items if b.get("batch_id") != batch_id]
+
+    if len(pending_items) == before:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    return {"status": "ok", "removed": batch_id}
 
     require_token(request)
 
