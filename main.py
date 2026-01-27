@@ -49,6 +49,35 @@ async def send(
 ):
     from fastapi import Request, HTTPException
 
+    require_token(request)
+
+    try:
+        data = json.loads(meta)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid meta")
+    total = 0
+    saved_files = []
+    for f in files:
+        contents = await f.read()
+        total += len(contents)
+        if total > MAX_FILE_SIZE:
+            raise HTTPException(status_code=413, detail="Too large")
+        fid = str(uuid.uuid4())
+        path = os.path.join(UPLOAD_DIR, f"{fid}_{f.filename}")
+        with open(path, "wb") as out:
+            out.write(contents)
+        saved_files.append({
+            "name": f.filename,
+            "path": path,
+            "size": len(contents)
+        })
+    pending_items.append({
+        "id": str(uuid.uuid4()),
+        "items": data["items"],
+        "files": saved_files
+    })
+    return {"ok": True}
+
 @app.post("/ack/{batch_id}")
 def ack_batch(batch_id: str, request: Request):
     auth = request.headers.get("Authorization")
@@ -63,38 +92,3 @@ def ack_batch(batch_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Batch not found")
 
     return {"status": "ok", "removed": batch_id}
-
-    require_token(request)
-
-    try:
-        data = json.loads(meta)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid meta")
-
-    total = 0
-    saved_files = []
-
-    for f in files:
-        contents = await f.read()
-        total += len(contents)
-        if total > MAX_FILE_SIZE:
-            raise HTTPException(status_code=413, detail="Too large")
-
-        fid = str(uuid.uuid4())
-        path = os.path.join(UPLOAD_DIR, f"{fid}_{f.filename}")
-        with open(path, "wb") as out:
-            out.write(contents)
-
-        saved_files.append({
-            "name": f.filename,
-            "path": path,
-            "size": len(contents)
-        })
-
-    pending_items.append({
-        "id": str(uuid.uuid4()),
-        "items": data["items"],
-        "files": saved_files
-    })
-
-    return {"ok": True}
