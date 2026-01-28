@@ -59,6 +59,45 @@
       cursor: pointer;
     }
     button.secondary { background: #2a2a2a; color: var(--text); }
+/* make non-button secondary pills visible */
+.secondary.upload-pill {
+  background: #2a2a2a;
+  color: var(--text);
+}
+.upload-pill{
+  position:relative;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:12px 14px;
+  border-radius:999px;
+  cursor:pointer;
+}
+.upload-sep{
+  width:1px;
+  height:16px;
+  background:#3a3a3a;
+}
+.upload-caret{font-size:12px;opacity:.8}
+.upload-menu{
+  position:absolute;
+  top:110%;
+  left:0;
+  background:#1e1e1e;
+  border:1px solid #2a2a2a;
+  border-radius:10px;
+  padding:6px;
+  display:none;
+  flex-direction:column;
+  min-width:120px;
+  z-index:10;
+}
+.upload-menu div{
+  padding:8px 10px;
+  border-radius:8px;
+  font-size:13px;
+}
+.upload-menu div:hover{background:#2a2a2a;}
     button.disabled { opacity: 0.4; pointer-events: none; }
     .toolbar { display: flex; gap: 6px; flex-wrap: wrap; }
     .toolbar button {
@@ -135,23 +174,36 @@
       <div id="textEditor" class="editor" contenteditable></div>
       <pre id="codeEditor" class="editor" contenteditable style="display:none;font-family:monospace;"></pre>
       <div class="row" style="align-items:center;">
-        <button type="button" class="secondary" id="fileBtn">Upload File</button>
-        <button type="button" class="secondary" id="imageBtn">Upload Image</button>
-        <div id="sizeInfo" style="margin-left:auto;font-size:12px;color:var(--muted);">0 / 100 MB</div>
-      </div>
-      <div id="pendingPills" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+  <div id="uploadDropdown" class="secondary upload-pill">
+    <span id="uploadMain">Upload</span>
+    <span class="upload-sep"></span>
+    <span id="uploadCaret" class="upload-caret">▾</span>
+    <div id="uploadMenu" class="upload-menu">
+      <div data-type="file">📄 File</div>
+      <div data-type="image">🖼️ Image</div>
+    </div>
+  </div>
+  <div id="sizeInfo" style="margin-left:auto;font-size:12px;color:var(--muted);">0 / 100 MB</div>
+</div>
+<div id="pendingPills" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
       <input id="fileInput" type="file" multiple style="display:none;" />
       <input id="imageInput" type="file" accept="image/*" multiple style="display:none;" />
       <button id="nextBtn" style="width:100%">Next</button>
     </div>
     <div class="card">
-      <h2 style="font-size:16px;margin:0">Ready to send</h2>
+      <div class="row" style="align-items:center;">
+  <h2 style="font-size:16px;margin:0">Ready to send</h2>
+  <div id="readySizeInfo" style="margin-left:auto;font-size:12px;color:var(--muted);">0 / 100 MB</div>
+</div>
       <div id="sentList" class="list"></div>
       <div id="status" class="status"></div>
       <button id="sendBtn" class="disabled">Send</button>
+<div id="finalSizeInfo" style="font-size:12px;text-align:center;color:var(--muted);margin-top:6px;">Server usage: loading…</div>
     </div>
   </div>
   <script>
+    console.log('[INIT] Web sender loaded');
+
     const textEditor = document.getElementById('textEditor');
     const codeEditor = document.getElementById('codeEditor');
     const sentList = document.getElementById('sentList');
@@ -159,17 +211,18 @@
     const statusEl = document.getElementById('status');
     const textModeBtn = document.getElementById('textMode');
     const codeModeBtn = document.getElementById('codeMode');
-    const fileBtn = document.getElementById('fileBtn');
-    const imageBtn = document.getElementById('imageBtn');
+    
     const pendingPills = document.getElementById('pendingPills');
     const sizeInfo = document.getElementById('sizeInfo');
     const MAX_BYTES = 100 * 1024 * 1024;
     let pendingUploads = [];
     let isSending = false;
     const API_URL = 'https://send-to-pc.onrender.com';
+    const SERVER_LIMIT_MB = 100;
     const APP_TOKEN = '9f8a1d3c4e6b7a2f8c9d0e1a2b3c4d5e153uoi135e7f8a9b0c1d2e3f4g5h6i7j';
 
     textModeBtn.onclick = () => {
+      console.log('[MODE] Switched to text');
       textModeBtn.classList.add('active');
       codeModeBtn.classList.remove('active');
       textEditor.style.display = 'block';
@@ -177,6 +230,7 @@
     };
 
     codeModeBtn.onclick = () => {
+      console.log('[MODE] Switched to code');
       codeModeBtn.classList.add('active');
       textModeBtn.classList.remove('active');
       textEditor.style.display = 'none';
@@ -185,6 +239,7 @@
 
     document.querySelectorAll('.toolbar button').forEach(btn => {
       btn.onclick = () => {
+        console.log('[FORMAT]', btn.dataset.tag);
         if (codeEditor.style.display === 'block') return;
         const sel = window.getSelection();
         if (!sel || sel.rangeCount === 0) return;
@@ -196,13 +251,45 @@
         sel.removeAllRanges();
         sel.addRange(range);
       };
-    }); // end of sentList.querySelectorAll('.item').forEach
+    });
 
     function refreshSendButton() {
-      sendBtn.classList.toggle('disabled', sentList.children.length === 0 || isSending);
-    }
+  console.log('[UI] Refresh send button', sentList.children.length, isSending);
+
+  let total = 0;
+  sentList.querySelectorAll('.item').forEach(item => {
+    const upload = item.__upload;
+    if (upload) total += upload.file.size;
+  });
+
+  sendBtn.classList.toggle('disabled', !total || isSending);
+}
+
+async function refreshServerUsage() {
+  try {
+    const res = await fetch(`${API_URL}/pending`, {
+      headers: { Authorization: `Bearer ${APP_TOKEN}` }
+    });
+    if (!res.ok) throw new Error('pending failed');
+    const data = await res.json();
+
+    let total = 0;
+    (data.batches || []).forEach(batch => {
+      (batch.files || []).forEach(f => total += f.size || 0);
+    });
+
+    const mb = Math.round(total / 1024 / 1024);
+    finalSizeInfo.textContent = `Server usage: ${mb} / ${SERVER_LIMIT_MB} MB`;
+    finalSizeInfo.style.color = total > MAX_BYTES ? 'var(--danger)' : 'var(--muted)';
+  } catch (e) {
+    console.error('[SERVER] usage fetch failed', e);
+    finalSizeInfo.textContent = 'Server usage: unavailable';
+    finalSizeInfo.style.color = 'var(--muted)';
+  }
+}
 
     function addItem(title, content, upload = null) {
+      console.log('[ITEM] Add', title, upload);
       const div = document.createElement('div');
       div.className = 'item';
       if (upload) div.__upload = upload;
@@ -220,11 +307,13 @@
 
       header.onclick = () => {
         const open = preview.style.display === 'block';
+        console.log('[ITEM] Toggle preview', title, !open);
         preview.style.display = open ? 'none' : 'block';
         preview.style.opacity = open ? '0' : '1';
       };
 
       del.onclick = e => {
+        console.log('[ITEM] Delete', title);
         e.stopPropagation();
         div.remove();
         refreshSendButton();
@@ -235,6 +324,7 @@
     }
 
     function renderPending() {
+      console.log('[UPLOADS] Render pending', pendingUploads.length);
       pendingPills.innerHTML = '';
       let total = 0;
 
@@ -250,6 +340,7 @@
         pill.onclick = () => {
           clicks++;
           if (clicks === 2) {
+            console.log('[UPLOADS] Remove pending', entry.file.name);
             pendingUploads = pendingUploads.filter(x => x !== entry);
             renderPending();
           }
@@ -262,22 +353,56 @@
       sizeInfo.textContent = `${Math.round(total / 1024 / 1024)} / 100 MB`;
       sizeInfo.style.color = total > MAX_BYTES ? 'var(--danger)' : 'var(--muted)';
     }
+
     document.getElementById('fileInput').onchange = e => {
+      console.log('[UPLOAD] Files selected', e.target.files.length);
       pendingUploads.push(...Array.from(e.target.files).map(f => ({ type: 'file', file: f })));
       e.target.value = '';
       renderPending();
     };
 
     document.getElementById('imageInput').onchange = e => {
+      console.log('[UPLOAD] Images selected', e.target.files.length);
       pendingUploads.push(...Array.from(e.target.files).map(f => ({ type: 'image', file: f })));
       e.target.value = '';
       renderPending();
     };
 
-    fileBtn.onclick = () => document.getElementById('fileInput').click();
-    imageBtn.onclick = () => document.getElementById('imageInput').click();
+    const uploadDropdown = document.getElementById('uploadDropdown');
+const uploadMenu = document.getElementById('uploadMenu');
+const uploadMain = document.getElementById('uploadMain');
+const uploadCaret = document.getElementById('uploadCaret');
+
+uploadMain.onclick = e => {
+  e.stopPropagation();
+  document.getElementById('fileInput').click();
+};
+
+uploadCaret.onclick = e => {
+  e.stopPropagation();
+  uploadMenu.style.display = uploadMenu.style.display === 'flex' ? 'none' : 'flex';
+};
+
+uploadMenu.querySelectorAll('div').forEach(opt=>{
+  opt.onclick = e =>{
+    e.stopPropagation();
+    uploadMenu.style.display='none';
+
+
+// close upload dropdown when clicking anywhere else
+ document.addEventListener('click', e => {
+  if (!uploadDropdown.contains(e.target)) {
+    uploadMenu.style.display = 'none';
+  }
+});
+    uploadMenu.style.display='none';
+    if(opt.dataset.type==='file') document.getElementById('fileInput').click();
+    if(opt.dataset.type==='image') document.getElementById('imageInput').click();
+  };
+});
 
     document.getElementById('nextBtn').onclick = () => {
+      console.log('[FLOW] Next clicked');
       if (codeEditor.style.display === 'block') {
         const c = codeEditor.innerText.trim();
         if (c) {
@@ -293,17 +418,21 @@
       }
 
       pendingUploads.forEach(entry => {
-  addItem(
-    entry.file.name,
-    `${entry.type === 'image' ? 'Image' : 'File'} (${Math.round(entry.file.size / 1024)} KB)`,
-    entry
-  );
-});
+        addItem(
+          entry.file.name,
+          `${entry.type === 'image' ? 'Image' : 'File'} (${Math.round(entry.file.size / 1024)} KB)`,
+          entry
+        );
+      });
       pendingUploads = [];
       renderPending();
     };
 
-    sendBtn.onclick = async () => {
+    // initial server usage fetch
+refreshServerUsage();
+
+sendBtn.onclick = async () => {
+      console.log('[SEND] Clicked');
       if (sendBtn.classList.contains('disabled') || isSending) return;
       isSending = true;
       statusEl.textContent = 'Sending…';
@@ -318,6 +447,8 @@
         const previewEl = item.querySelector('.item-preview');
         const preview = previewEl ? previewEl.innerHTML : '';
 
+        console.log('[SEND] Collect item', title);
+
         if (title === 'Text message') {
           items.push({ type: 'text', name: null, size: preview.length, content: preview, file_path: null });
         } else if (title === 'Code block') {
@@ -326,16 +457,12 @@
           const upload = item.__upload;
           if (upload) {
             form.append('files', upload.file);
-            items.push({
-              type: upload.type,
-              name: upload.file.name,
-              size: upload.file.size,
-              content: null,
-              file_path: null
-            });
+            items.push({ type: upload.type, name: upload.file.name, size: upload.file.size, content: null, file_path: null });
           }
         }
       });
+
+      console.log('[SEND] Items payload', items);
 
       form.append('meta', JSON.stringify({ items }));
 
@@ -346,12 +473,16 @@
           body: form
         });
 
+        console.log('[SEND] Response status', res.status);
+
         if (!res.ok) throw new Error('Upload failed');
 
         statusEl.textContent = 'Sent successfully';
         statusEl.className = 'status success';
         sentList.innerHTML = '';
-      } catch {
+        refreshServerUsage();
+      } catch (err) {
+        console.error('[SEND] Error', err);
         statusEl.textContent = 'Send failed. Tap Send to retry.';
         statusEl.className = 'status error';
       } finally {
