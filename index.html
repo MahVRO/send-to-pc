@@ -47,6 +47,12 @@
       padding: 10px;
       font-size: 14px;
     }
+    .code-editor {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      white-space: pre;
+      tab-size: 2;
+      line-height: 1.45;
+    }
     .editor:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
     button {
       padding: 12px;
@@ -172,7 +178,7 @@
         <button data-tag="s">S</button>
       </div>
       <div id="textEditor" class="editor" contenteditable></div>
-      <pre id="codeEditor" class="editor" contenteditable style="display:none;font-family:monospace;"></pre>
+      <pre id="codeEditor" class="editor code-editor" contenteditable="true" spellcheck="false" style="display:none;"></pre>
       <div class="row" style="align-items:center;">
   <div id="uploadDropdown" class="secondary upload-pill">
     <span id="uploadMain">Upload</span>
@@ -202,294 +208,249 @@
     </div>
   </div>
   <script>
-    console.log('[INIT] Web sender loaded');
+  console.log('[INIT] Web sender loaded');
 
-    const textEditor = document.getElementById('textEditor');
-    const codeEditor = document.getElementById('codeEditor');
-    const sentList = document.getElementById('sentList');
-    const sendBtn = document.getElementById('sendBtn');
-    const statusEl = document.getElementById('status');
-    const textModeBtn = document.getElementById('textMode');
-    const codeModeBtn = document.getElementById('codeMode');
-    
-    const pendingPills = document.getElementById('pendingPills');
-    const sizeInfo = document.getElementById('sizeInfo');
-    const MAX_BYTES = 100 * 1024 * 1024;
-    let pendingUploads = [];
-    let isSending = false;
-    const API_URL = 'https://send-to-pc.onrender.com';
-    const SERVER_LIMIT_MB = 100;
-    const APP_TOKEN = '9f8a1d3c4e6b7a2f8c9d0e1a2b3c4d5e153uoi135e7f8a9b0c1d2e3f4g5h6i7j';
+  const textEditor = document.getElementById('textEditor');
+  const codeEditor = document.getElementById('codeEditor');
+  const sentList = document.getElementById('sentList');
+  const sendBtn = document.getElementById('sendBtn');
+  const statusEl = document.getElementById('status');
+  const textModeBtn = document.getElementById('textMode');
+  const codeModeBtn = document.getElementById('codeMode');
+  const pendingPills = document.getElementById('pendingPills');
+  const sizeInfo = document.getElementById('sizeInfo');
+  const readySizeInfo = document.getElementById('readySizeInfo');
+  const finalSizeInfo = document.getElementById('finalSizeInfo');
 
-    textModeBtn.onclick = () => {
-      console.log('[MODE] Switched to text');
-      textModeBtn.classList.add('active');
-      codeModeBtn.classList.remove('active');
-      textEditor.style.display = 'block';
-      codeEditor.style.display = 'none';
+  const MAX_BYTES = 100 * 1024 * 1024;
+  const SERVER_LIMIT_MB = 100;
+  const API_URL = 'https://send-to-pc.onrender.com';
+  const APP_TOKEN = '9f8a1d3c4e6b7a2f8c9d0e1a2b3c4d5e153uoi135e7f8a9b0c1d2e3f4g5h6i7j';
+
+  let pendingUploads = [];
+  let isSending = false;
+
+  textEditor.style.display = 'block';
+  codeEditor.style.display = 'none';
+
+  textModeBtn.onclick = () => {
+    textModeBtn.classList.add('active');
+    codeModeBtn.classList.remove('active');
+    textEditor.style.display = 'block';
+    codeEditor.style.display = 'none';
+  };
+
+  codeModeBtn.onclick = () => {
+    codeModeBtn.classList.add('active');
+    textModeBtn.classList.remove('active');
+    textEditor.style.display = 'none';
+    codeEditor.style.display = 'block';
+    codeEditor.focus();
+  };
+
+  document.querySelectorAll('.toolbar button').forEach(btn => {
+    btn.onclick = () => {
+      if (codeEditor.style.display === 'block') return;
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const range = sel.getRangeAt(0);
+      if (!textEditor.contains(range.commonAncestorContainer)) return;
+      const el = document.createElement(btn.dataset.tag);
+      el.appendChild(range.extractContents());
+      range.insertNode(el);
+      sel.removeAllRanges();
+      sel.addRange(range);
     };
-
-    codeModeBtn.onclick = () => {
-      console.log('[MODE] Switched to code');
-      codeModeBtn.classList.add('active');
-      textModeBtn.classList.remove('active');
-      textEditor.style.display = 'none';
-      codeEditor.style.display = 'block';
-    };
-
-    document.querySelectorAll('.toolbar button').forEach(btn => {
-      btn.onclick = () => {
-        console.log('[FORMAT]', btn.dataset.tag);
-        if (codeEditor.style.display === 'block') return;
-        const sel = window.getSelection();
-        if (!sel || sel.rangeCount === 0) return;
-        const range = sel.getRangeAt(0);
-        if (!textEditor.contains(range.commonAncestorContainer)) return;
-        const el = document.createElement(btn.dataset.tag);
-        el.appendChild(range.extractContents());
-        range.insertNode(el);
-        sel.removeAllRanges();
-        sel.addRange(range);
-      };
-    });
-
-    function refreshSendButton() {
-  console.log('[UI] Refresh send button', sentList.children.length, isSending);
-
-  let total = 0;
-  sentList.querySelectorAll('.item').forEach(item => {
-    const upload = item.__upload;
-    if (upload) total += upload.file.size;
   });
 
-  sendBtn.classList.toggle('disabled', !total || isSending);
-}
-
-async function refreshServerUsage() {
-  try {
-    const res = await fetch(`${API_URL}/pending`, {
-      headers: { Authorization: `Bearer ${APP_TOKEN}` }
-    });
-    if (!res.ok) throw new Error('pending failed');
-    const data = await res.json();
-
+  function refreshSendButton() {
     let total = 0;
-    (data.batches || []).forEach(batch => {
-      (batch.files || []).forEach(f => total += f.size || 0);
+    sentList.querySelectorAll('.item').forEach(item => {
+      if (item.__upload) total += item.__upload.file.size;
+    });
+    const mb = Math.round(total / 1024 / 1024);
+    readySizeInfo.textContent = `${mb} / 100 MB`;
+    readySizeInfo.style.color = total > MAX_BYTES ? 'var(--danger)' : 'var(--muted)';
+    sendBtn.classList.toggle('disabled', sentList.children.length === 0 || isSending || total > MAX_BYTES);
+  }
+
+  async function refreshServerUsage() {
+    try {
+      const res = await fetch(`${API_URL}/pending`, {
+        headers: { Authorization: `Bearer ${APP_TOKEN}` }
+      });
+      if (!res.ok) throw new Error('pending failed');
+      const data = await res.json();
+      let total = 0;
+      (data.batches || []).forEach(b => (b.files || []).forEach(f => total += f.size || 0));
+      const mb = Math.round(total / 1024 / 1024);
+      finalSizeInfo.textContent = `Server usage: ${mb} / ${SERVER_LIMIT_MB} MB`;
+    } catch {
+      finalSizeInfo.textContent = 'Server usage: unavailable';
+    }
+  }
+
+  function addItem(title, content, upload = null) {
+    const div = document.createElement('div');
+    div.className = 'item';
+    if (upload) div.__upload = upload;
+    div.innerHTML = `
+      <div class="item-header">
+        <div class="item-title">${title}<br><span>pending</span></div>
+        <button class="delete-x">×</button>
+      </div>
+      <div class="item-preview">${content}</div>
+    `;
+
+    const preview = div.querySelector('.item-preview');
+    const del = div.querySelector('.delete-x');
+
+    div.querySelector('.item-header').onclick = () => {
+      preview.style.display = preview.style.display === 'block' ? 'none' : 'block';
+    };
+
+    del.onclick = e => {
+      e.stopPropagation();
+      div.remove();
+      refreshSendButton();
+    };
+
+    sentList.appendChild(div);
+    refreshSendButton();
+  }
+
+  function renderPending() {
+    pendingPills.innerHTML = '';
+    let total = 0;
+
+    pendingUploads.forEach(entry => {
+      total += entry.file.size;
+      const pill = document.createElement('div');
+      pill.className = 'pill';
+      pill.textContent = `${entry.type === 'image' ? '🖼️' : '📄'} ${entry.file.name}`;
+
+      let holdTimer;
+      pill.addEventListener('pointerdown', () => {
+        pill.classList.add('hold');
+        holdTimer = setTimeout(() => {
+          pendingUploads = pendingUploads.filter(x => x !== entry);
+          renderPending();
+        }, 500);
+      });
+
+      pill.addEventListener('pointerup', () => {
+        pill.classList.remove('hold');
+        clearTimeout(holdTimer);
+      });
+
+      pill.addEventListener('pointerleave', () => {
+        pill.classList.remove('hold');
+        clearTimeout(holdTimer);
+      });
+
+      pendingPills.appendChild(pill);
     });
 
-    const mb = Math.round(total / 1024 / 1024);
-    finalSizeInfo.textContent = `Server usage: ${mb} / ${SERVER_LIMIT_MB} MB`;
-    finalSizeInfo.style.color = total > MAX_BYTES ? 'var(--danger)' : 'var(--muted)';
-  } catch (e) {
-    console.error('[SERVER] usage fetch failed', e);
-    finalSizeInfo.textContent = 'Server usage: unavailable';
-    finalSizeInfo.style.color = 'var(--muted)';
+    sizeInfo.textContent = `${Math.round(total / 1024 / 1024)} / 100 MB`;
   }
-}
 
-    function addItem(title, content, upload = null) {
-      console.log('[ITEM] Add', title, upload);
-      const div = document.createElement('div');
-      div.className = 'item';
-      if (upload) div.__upload = upload;
-      div.innerHTML = `
-        <div class="item-header">
-          <div class="item-title">${title}<br><span>pending</span></div>
-          <button class="delete-x">×</button>
-        </div>
-        <div class="item-preview">${content}</div>
-      `;
-
-      const preview = div.querySelector('.item-preview');
-      const del = div.querySelector('.delete-x');
-      const header = div.querySelector('.item-header');
-
-      header.onclick = () => {
-        const open = preview.style.display === 'block';
-        console.log('[ITEM] Toggle preview', title, !open);
-        preview.style.display = open ? 'none' : 'block';
-        preview.style.opacity = open ? '0' : '1';
-      };
-
-      del.onclick = e => {
-        console.log('[ITEM] Delete', title);
-        e.stopPropagation();
-        div.remove();
-        refreshSendButton();
-      };
-
-      sentList.appendChild(div);
-      refreshSendButton();
-    }
-
-    function renderPending() {
-      console.log('[UPLOADS] Render pending', pendingUploads.length);
-      pendingPills.innerHTML = '';
-      let total = 0;
-
-      pendingUploads.forEach(entry => {
-        total += entry.file.size;
-        const pill = document.createElement('div');
-        pill.className = 'pill';
-        pill.textContent = `${entry.type === 'image' ? '🖼️' : '📄'} ${entry.file.name}`;
-
-        let clicks = 0;
-        pill.onmouseenter = () => pill.classList.add('hover');
-        pill.onmouseleave = () => pill.classList.remove('hover');
-        pill.onclick = () => {
-          clicks++;
-          if (clicks === 2) {
-            console.log('[UPLOADS] Remove pending', entry.file.name);
-            pendingUploads = pendingUploads.filter(x => x !== entry);
-            renderPending();
-          }
-          setTimeout(() => clicks = 0, 300);
-        };
-
-        pendingPills.appendChild(pill);
-      });
-
-      sizeInfo.textContent = `${Math.round(total / 1024 / 1024)} / 100 MB`;
-      sizeInfo.style.color = total > MAX_BYTES ? 'var(--danger)' : 'var(--muted)';
-    }
-
-    document.getElementById('fileInput').onchange = e => {
-      console.log('[UPLOAD] Files selected', e.target.files.length);
-      pendingUploads.push(...Array.from(e.target.files).map(f => ({ type: 'file', file: f })));
-      e.target.value = '';
-      renderPending();
-    };
-
-    document.getElementById('imageInput').onchange = e => {
-      console.log('[UPLOAD] Images selected', e.target.files.length);
-      pendingUploads.push(...Array.from(e.target.files).map(f => ({ type: 'image', file: f })));
-      e.target.value = '';
-      renderPending();
-    };
-
-    const uploadDropdown = document.getElementById('uploadDropdown');
-const uploadMenu = document.getElementById('uploadMenu');
-const uploadMain = document.getElementById('uploadMain');
-const uploadCaret = document.getElementById('uploadCaret');
-
-uploadMain.onclick = e => {
-  e.stopPropagation();
-  document.getElementById('fileInput').click();
-};
-
-uploadCaret.onclick = e => {
-  e.stopPropagation();
-  uploadMenu.style.display = uploadMenu.style.display === 'flex' ? 'none' : 'flex';
-};
-
-uploadMenu.querySelectorAll('div').forEach(opt=>{
-  opt.onclick = e =>{
-    e.stopPropagation();
-    uploadMenu.style.display='none';
-
-
-// close upload dropdown when clicking anywhere else
- document.addEventListener('click', e => {
-  if (!uploadDropdown.contains(e.target)) {
-    uploadMenu.style.display = 'none';
-  }
-});
-    uploadMenu.style.display='none';
-    if(opt.dataset.type==='file') document.getElementById('fileInput').click();
-    if(opt.dataset.type==='image') document.getElementById('imageInput').click();
+  document.getElementById('fileInput').onchange = e => {
+    pendingUploads.push(...Array.from(e.target.files).map(f => ({ type: 'file', file: f })));
+    e.target.value = '';
+    renderPending();
   };
-});
 
-    document.getElementById('nextBtn').onclick = () => {
-      console.log('[FLOW] Next clicked');
-      if (codeEditor.style.display === 'block') {
-        const c = codeEditor.innerText.trim();
-        if (c) {
-          addItem('Code block', `<pre>${c}</pre>`);
-          codeEditor.innerText = '';
-        }
-      } else {
-        const t = textEditor.innerHTML.trim();
-        if (t) {
-          addItem('Text message', t);
-          textEditor.innerHTML = '';
-        }
-      }
+  document.getElementById('imageInput').onchange = e => {
+    pendingUploads.push(...Array.from(e.target.files).map(f => ({ type: 'image', file: f })));
+    e.target.value = '';
+    renderPending();
+  };
 
-      pendingUploads.forEach(entry => {
-        addItem(
-          entry.file.name,
-          `${entry.type === 'image' ? 'Image' : 'File'} (${Math.round(entry.file.size / 1024)} KB)`,
-          entry
-        );
-      });
-      pendingUploads = [];
-      renderPending();
+  document.getElementById('uploadMain').onclick = () => document.getElementById('fileInput').click();
+
+  document.getElementById('uploadCaret').onclick = e => {
+    e.stopPropagation();
+    const menu = document.getElementById('uploadMenu');
+    menu.style.display = menu.style.display === 'none' || !menu.style.display ? 'flex' : 'none';
+  };
+
+  document.addEventListener('click', e => {
+    const menu = document.getElementById('uploadMenu');
+    if (!document.getElementById('uploadDropdown').contains(e.target)) {
+      menu.style.display = 'none';
+    }
+  });
+
+  document.querySelectorAll('#uploadMenu div').forEach(opt => {
+    opt.onclick = e => {
+      e.stopPropagation();
+      document.getElementById('uploadMenu').style.display = 'none';
+      if (opt.dataset.type === 'file') document.getElementById('fileInput').click();
+      if (opt.dataset.type === 'image') document.getElementById('imageInput').click();
     };
+  });
 
-    // initial server usage fetch
-refreshServerUsage();
+  document.getElementById('nextBtn').onclick = () => {
+    if (codeEditor.style.display === 'block') {
+      const c = codeEditor.innerText.trim();
+      if (c) addItem('Code block', `<pre>${c}</pre>`);
+      codeEditor.innerText = '';
+    } else {
+      const t = textEditor.innerHTML.trim();
+      if (t) addItem('Text message', t);
+      textEditor.innerHTML = '';
+    }
 
-sendBtn.onclick = async () => {
-      console.log('[SEND] Clicked');
-      if (sendBtn.classList.contains('disabled') || isSending) return;
-      isSending = true;
-      statusEl.textContent = 'Sending…';
-      statusEl.className = 'status';
+    pendingUploads.forEach(entry => {
+      addItem(entry.file.name, `${entry.type} (${Math.round(entry.file.size / 1024)} KB)`, entry);
+    });
+
+    pendingUploads = [];
+    renderPending();
+  };
+
+  refreshServerUsage();
+
+  sendBtn.onclick = async () => {
+    if (sendBtn.classList.contains('disabled') || isSending) return;
+    isSending = true;
+    refreshSendButton();
+
+    const form = new FormData();
+    const items = [];
+
+    sentList.querySelectorAll('.item').forEach(item => {
+      const title = item.querySelector('.item-title').childNodes[0].textContent.trim();
+      const preview = item.querySelector('.item-preview').innerHTML;
+      if (title === 'Text message') items.push({ type: 'text', content: preview });
+      else if (title === 'Code block') items.push({ type: 'code', content: preview });
+      else if (item.__upload) {
+        form.append('files', item.__upload.file);
+        items.push({ type: item.__upload.type, name: item.__upload.file.name, size: item.__upload.file.size });
+      }
+    });
+
+    form.append('meta', JSON.stringify({ items }));
+
+    try {
+      const res = await fetch(`${API_URL}/send`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${APP_TOKEN}` },
+        body: form
+      });
+      if (!res.ok) throw new Error();
+      statusEl.textContent = 'Sent successfully';
+      statusEl.className = 'status success';
+      sentList.innerHTML = '';
+      refreshServerUsage();
+    } catch {
+      statusEl.textContent = 'Send failed. Tap Send to retry.';
+      statusEl.className = 'status error';
+    } finally {
+      isSending = false;
       refreshSendButton();
-
-      const form = new FormData();
-      const items = [];
-
-      sentList.querySelectorAll('.item').forEach(item => {
-        const title = item.querySelector('.item-title').childNodes[0].textContent.trim();
-        const previewEl = item.querySelector('.item-preview');
-        const preview = previewEl ? previewEl.innerHTML : '';
-
-        console.log('[SEND] Collect item', title);
-
-        if (title === 'Text message') {
-          items.push({ type: 'text', name: null, size: preview.length, content: preview, file_path: null });
-        } else if (title === 'Code block') {
-          items.push({ type: 'code', name: null, size: preview.length, content: preview, file_path: null });
-        } else {
-          const upload = item.__upload;
-          if (upload) {
-            form.append('files', upload.file);
-            items.push({ type: upload.type, name: upload.file.name, size: upload.file.size, content: null, file_path: null });
-          }
-        }
-      });
-
-      console.log('[SEND] Items payload', items);
-
-      form.append('meta', JSON.stringify({ items }));
-
-      try {
-        const res = await fetch(`${API_URL}/send`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${APP_TOKEN}` },
-          body: form
-        });
-
-        console.log('[SEND] Response status', res.status);
-
-        if (!res.ok) throw new Error('Upload failed');
-
-        statusEl.textContent = 'Sent successfully';
-        statusEl.className = 'status success';
-        sentList.innerHTML = '';
-        refreshServerUsage();
-      } catch (err) {
-        console.error('[SEND] Error', err);
-        statusEl.textContent = 'Send failed. Tap Send to retry.';
-        statusEl.className = 'status error';
-      } finally {
-        isSending = false;
-        refreshSendButton();
-      }
-    };
-  </script>
+    }
+  };
+</script>
 </body>
 </html>
